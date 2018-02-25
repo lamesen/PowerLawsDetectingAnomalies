@@ -13,7 +13,7 @@ def import_data():
     a pandas DataFrame containing a combined training set.
     """
 
-    # Read all data from csv
+    # Import all data from csv
     data = {
         'tra': pd.read_csv('./input/train.csv',
                            index_col=0,
@@ -36,19 +36,38 @@ def import_data():
                           low_memory=False)
     }
 
-    # Date object creation and formatting
+    # Date feature creation and formatting
     for df in ['tra', 'wx']:
         data[df]['Date'] = data[df]['Timestamp'].dt.date
     data['hol']['Date'] = data['hol']['Date'].dt.date
 
-    # Join datasets
-    train = pd.merge(data['tra'], data['meta'], how='left', on=['meter_id'])
-    train = pd.merge(train, data['hol'], how='left', on=['Date', 'site_id'])
-    train = pd.merge(train, data['wx'], how='left', on=['Timestamp', 'site_id'])
-    train = train.drop(['Date_y'], axis=1)
-    train = train.rename(index=str, columns={'Date_x': 'Date'})
+    # Join train and meta DataFrames
+    final = pd.merge(data['tra'], data['meta'], how='left', on=['meter_id'])
+
+    # Clean holiday DataFrame and then join to the final DataFrame
+    data['hol'].Holiday = 1
+    data['hol'] = data['hol'].drop_duplicates()
+    final = pd.merge(final, data['hol'], how='left', on=['Date', 'site_id'])
+    final['Holiday'].fillna(value=0, inplace=True)
+
+    # Clean weather DataFrame and then join to the final DataFrame
+    data['wx'] = data['wx'].drop_duplicates()
+    agg = data['wx'].groupby(['Timestamp', 'site_id']).mean()
+    final = pd.merge(final, agg.reset_index(), how='left', on=['Timestamp', 'site_id'])
+    final = final.rename(str.lower, axis='columns')
+
+    return final
+
+
+def create_train_test(dataset):
+    """This function performs feature engineering and further data cleansing and produces a train and test set
+    ::param:: dataset
+    the input data set to be prepared for modeling
+
+    ::return:: train, test
+    two Pandas DataFrame objects with train and test set splits
+    """
+    # Convert Wh to kWh
 
     # Handle fill missing values with -1 flag
-    train = train.fillna(-1)
-
-    return train
+    # train = train.fillna(-1)
