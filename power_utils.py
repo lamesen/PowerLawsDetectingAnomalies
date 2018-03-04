@@ -1,10 +1,10 @@
+import numba
 import pandas as pd
-import numpy as np
-from sklearn import preprocessing, metrics, cluster
-from sklearn.model_selection import TimeSeriesSplit
-import statsmodels.api as sm
+# import numpy as np
+from sklearn.preprocessing import MinMaxScaler
 
 
+@numba.jit
 def import_data():
     """Data munging for Power Laws: Detecting Anomalies in Usage competition
     https://www.drivendata.org/competitions/52/anomaly-detection-electricity/page/102/
@@ -56,10 +56,13 @@ def import_data():
     final = pd.merge(final, agg.reset_index(), how='left', on=['Timestamp', 'site_id'])
     final = final.rename(str.lower, axis='columns')
 
+    final.to_csv('./tmp/train_merged.csv')
+
     return final
 
 
-def create_train_test(dataset):
+@numba.jit
+def create_train_set():
     """This function performs feature engineering and further data cleansing and produces a train and test set
     ::param:: dataset
     the input data set to be prepared for modeling
@@ -67,7 +70,62 @@ def create_train_test(dataset):
     ::return:: train, test
     two Pandas DataFrame objects with train and test set splits
     """
-    # Convert Wh to kWh
+    dataset = import_data()
+    dataset.sort_values(by=['meter_id', 'timestamp'], inplace=True)
+    dataset = dataset.set_index('timestamp')
+    dataset.index = dataset.index.to_datetime()
 
-    # Handle fill missing values with -1 flag
-    # train = train.fillna(-1)
+    # Drop meter id: Too many levels
+    dataset.drop('meter_id', inplace=True, axis=1)
+
+    # Convert Wh to kWh
+    dataset['values'] = dataset.apply(lambda r: (r['values'] / 1000) if r['units'] == 'Wh' else r['values'], axis=1)
+    dataset['units'] = dataset.apply(lambda r: 'kWh' if r['units'] == 'Wh' else r['units'], axis=1)
+
+    # Lags
+    # dataset['values_business_day_lag_1'] = dataset['values'].tshift(1, freq='B')
+    # dataset['values_day_lag_1'] = dataset['values'].tshift(1, freq='D')
+    # dataset['values_day_lag_7'] = dataset['values'].tshift(7, freq='D')
+    #
+    # # Differencing
+    # dataset['values_business_day_diff_1'] = dataset['values'] - dataset['values_business_day_lag_1']
+    # dataset['values_day_diff_1'] = dataset['values'] - dataset['values_day_lag_1']
+    # dataset['values_day_diff_7'] = dataset['values'] - dataset['values_day_lag_7']
+
+    # Day of the week
+    dataset['date'] = pd.to_datetime(dataset['date'])
+    dataset['dow'] = dataset['date'].dt.dayofweek
+    dataset['wom'] = (dataset['date'].dt.day - 1) // 7 + 1
+    dataset['year'] = dataset['date'].dt.year
+    dataset['month'] = dataset['date'].dt.month
+    dataset['day'] = dataset['date'].dt.month
+    dataset['hour'] = dataset['date'].dt.hour
+    dataset['minute'] = dataset['date'].dt.minute
+    dataset.drop('date', inplace=True, axis=1)
+
+    # Business Hours
+    # dataset['business_hours'] = dataset.apply(lambda r: 1 if 8 <= r.index.hour < 17 else 0)
+    # dataset['evening'] = dataset.apply(lambda r: 1 if 17 <= r.index.hour < 23 else 0)
+    # dataset['overnight'] = dataset.apply(lambda r: 0 if r['business_hours'] == 1 or r['evening'] == 1 else 0)
+
+    # Dummy coding
+    categorical_vars = ['site_id', 'meter_description', 'units', 'activity']
+    for var in categorical_vars:
+        s = pd.get_dummies(dataset[var], prefix=var)
+        s.columns = s.columns.str.replace(" ", "_")
+        dataset.drop(var, inplace=True, axis=1)
+        dataset = pd.concat([dataset, s], axis=1)
+
+    # Center and scale variables
+    numerical_vars = ['surface', 'temperature', 'distance']
+    min_max_scaler = MinMaxScaler()
+    s = pd.DataFrame(min_max_scaler.fit_transform(dataset[numerical_vars].fillna(-1)), columns=numerical_vars)
+    s.index = dataset.index
+    dataset.drop(numerical_vars, inplace=True, axis=1)
+    dataset = pd.concat([dataset, s], axis=1)
+
+    # Split the data set
+    train = dataset
+    dataset.to_csv('./tmp/train_prepared.csv')
+
+    return train
