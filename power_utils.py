@@ -4,7 +4,6 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 
 
-@numba.jit
 def import_data():
     """Data munging for Power Laws: Detecting Anomalies in Usage competition
     https://www.drivendata.org/competitions/52/anomaly-detection-electricity/page/102/
@@ -61,7 +60,6 @@ def import_data():
     return final
 
 
-@numba.jit
 def create_train_set():
     """This function performs feature engineering and further data cleansing and produces a train and test set
     ::param:: dataset
@@ -72,8 +70,8 @@ def create_train_set():
     """
     dataset = import_data()
     dataset.sort_values(by=['meter_id', 'timestamp'], inplace=True)
-    dataset = dataset.set_index('timestamp')
-    dataset.index = dataset.index.to_datetime()
+    # dataset = dataset.set_index('timestamp')
+    # dataset.index = dataset.index.to_datetime()
 
     # Drop meter id: Too many levels
     dataset.drop('meter_id', inplace=True, axis=1)
