@@ -1,87 +1,56 @@
 import pandas as pd
-import numpy as np
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import TimeSeriesSplit
 
-def load_train(columns):
+
+def load_train():
     print('Reading file')
-    train = pd.read_csv('./tmp/train_prepared.csv', names=columns, skiprows=1)
+    train = pd.read_csv('./tmp/train_prepared.csv')
     remove = ['obs_id', 'timestamp', 'values']
-    predictors = [x for x in columns if x not in remove]
-    target = ['values']
+    predictors = [x for x in train.columns if x not in remove]
 
-    dtrain = xgb.DMatrix(train.ix[:, predictors], train[2])
-    dtrain.save_binary('./tmp/train.dmatrix')
+    X = train[predictors]
+    y = train['values']
 
-    return dtrain
+    return X, y
+
 
 if __name__ == "__main__":
+    X, y = load_train()
 
-    columns = ['obs_id',
-               'timestamp',
-               'values',
-               'holiday',
-               'dow',
-               'wom',
-               'year',
-               'month',
-               'day',
-               'hour',
-               'minute',
-               'site_id_038',
-               'site_id_234_203',
-               'site_id_334_61',
-               'meter_description_Lighting',
-               'meter_description_RTE_meter',
-               'meter_description_RTE_meter_cos_phi',
-               'meter_description_RTE_meter_demand',
-               'meter_description_RTE_meter_reactive',
-               'meter_description_Test_Bay',
-               'meter_description_cold_group',
-               'meter_description_compressed_air',
-               'meter_description_cuisine',
-               'meter_description_elevators',
-               'meter_description_generator',
-               'meter_description_guardhouse',
-               'meter_description_heating',
-               'meter_description_laboratory',
-               'meter_description_lighting',
-               'meter_description_main_meter',
-               'meter_description_main_meter__demand',
-               'meter_description_main_meter_cos_phi',
-               'meter_description_main_meter_reactive_energy',
-               'meter_description_other',
-               'meter_description_outside_temperature',
-               'meter_description_temperature',
-               'meter_description_total_workers',
-               'meter_description_virtual_main',
-               'meter_description_virtual_meter',
-               'units_count',
-               'units_degree_celsius',
-               'units_kWh',
-               'activity_general',
-               'activity_laboratory',
-               'activity_office',
-               'activity_restaurant',
-               'surface',
-               'temperature',
-               'distance']
+    xgb_model = xgb.XGBClassifier()
 
     print('Training model')
-    dtrain = load_train(columns)
+    cv = 5
 
-    param = {'max_depth': 2, 'eta': 1, 'silent': 1, 'objective': 'gpu:reg:linear'}
-    param['gpu_id'] = 0
-    param['max_bin'] = 16
-    param['tree_method'] = 'gpu_hist'
+    parameters = {'nthread': [1],
+                  'objective': ['reg:linear'],
+                  'learning_rate': [0.05],
+                  'max_depth': [6],
+                  'min_child_weight': [11],
+                  'silent': [1],
+                  'subsample': [0.8],
+                  'colsample_bytree': [0.7],
+                  'n_estimators': [1000],
+                  'missing': [-1],
+                  'seed': [1337]}
 
-    num_round = 2
+    clf = GridSearchCV(xgb_model, parameters, n_jobs=5,
+                       cv=TimeSeriesSplit(n_splits=cv).get_n_splits([X, y]),
+                       scoring='neg_mean_squared_error',
+                       verbose=2, refit=True)
 
-    bst = xgb.train(param, dtrain, num_round)
-    predictions = bst.predict(dtrain)
+    clf.fit(X, y)
 
-    train = pd.read_csv('./tmp/train_prepared.csv', names=columns, skiprows=1)
+    best_parameters, score, _ = max(clf.cv_results_, key=lambda x: x[1])
+    print('Raw RMSE score:', score)
+    for param_name in sorted(best_parameters.keys()):
+        print("%s: %r" % (param_name, best_parameters[param_name]))
+
+    predictions = clf.predict(X)[:, 1]
 
     print('Applying predictions')
+    train = pd.read_csv('./tmp/train_prepared.csv')
     train['predictions'] = predictions
     train.to_csv('./tmp/train_scored.csv')
