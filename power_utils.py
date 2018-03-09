@@ -1,7 +1,6 @@
-import numba
 import pandas as pd
-# import numpy as np
-from sklearn.preprocessing import MinMaxScaler
+import numpy as np
+from datetime import datetime
 
 
 def import_data():
@@ -132,3 +131,40 @@ def create_train_set():
     train.to_csv('./tmp/train_prepared.csv', index=False)
 
     return train
+
+
+def absolute_difference(obs_val, pred_val):
+    return np.absolute(pred_val - obs_val)
+
+
+def score_predictions(train_loc, test_loc, prediction_loc, prediction_colname, prediction_cutoff, output_note):
+    train = pd.read_csv(train_loc)
+    predictions = pd.read_csv(prediction_loc)
+    test = pd.read_csv(test_loc)
+
+    train['predictions'] = predictions[prediction_colname]
+
+    train_clean = train.drop_duplicates(['timestamp', 'meter_id'])
+    combined = pd.merge(train_clean, test, how='left', left_on=['timestamp', 'meter_id'],
+                        right_on=['Timestamp', 'meter_id'])
+    combined['abs_err'] = combined.apply(lambda r: absolute_difference(r['values'], r['predictions']), axis=1)
+    combined = pd.merge(combined, combined.groupby('meter_id')['abs_err'].mean().reset_index(name='average_abs_err'),
+                        how='left', on='meter_id')
+    combined['anomaly_score'] = combined['abs_err'] / combined['average_abs_err']
+    anomaly_cutoff = combined['anomaly_score'].quantile(q=prediction_cutoff)
+    test_final = combined.dropna(subset=['is_abnormal'])
+    test_final['is_abnormal'] = test_final.apply(lambda r: r['anomaly_score'] > anomaly_cutoff,
+                                                 axis=1)
+
+    print(test_final.is_abnormal.value_counts())
+
+    test_scored = test_final[['obs_id_y', 'meter_id', 'Timestamp', 'is_abnormal']]
+    test_scored.columns = ['obs_id', 'meter_id', 'Timestamp', 'is_abnormal']
+    test_scored['obs_id'] = test_scored.loc[:, 'obs_id'].astype(int)
+    now = datetime.now()
+    test_scored.to_csv('./output/test_scored_{}{}.csv'.format(now.strftime("%y%m%d%H%M%S"), output_note),
+                       index=False)
+
+
+def score_clusters():
+    pass
